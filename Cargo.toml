@@ -1,0 +1,16 @@
+[package]
+name = "balances-shim"
+version = "0.1.0"
+authors = ["David Craven <david@craven.ch>"]
+edition = "2018"
+
+[dependencies]
+jsonrpc-core-client = "13.0.0"
+jsonrpc-derive = "13.0.0"
+jsonrpc-core = "13.0.0"
+jsonrpc-http-server = "13.0.0"
+serde = "1.0.98"
+substrate-primitives = { path = "../substrate/core/primitives" }
+
+[dev-dependencies]
+substrate-keyring = { path = "../substrate/core/keyring" }
