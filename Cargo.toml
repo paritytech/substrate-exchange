@@ -7,22 +7,16 @@ edition = "2018"
 [dependencies]
 env_logger = "0.6"
 futures = "0.1"
-jsonrpc-core-client = { version = "12.0.0", features = ["ws"] }
-jsonrpc-derive = "12.0.0"
 jsonrpc-core = "12.0.0"
+jsonrpc-derive = "12.0.0"
 jsonrpc-http-server = "12.0.0"
 log = "0.4"
-node-runtime = { path = "../substrate/node/runtime", features = ["std"] }
-parity-codec = { version = "4.1", default-features = false, features = ["derive", "full"] }
-runtime-primitives = { path = "../substrate/core/sr-primitives", package = "sr-primitives" }
-runtime-support = { path = "../substrate/srml/support", package = "srml-support" }
+node-runtime = { git = "https://github.com/paritytech/substrate", features = ["std"] }
 serde = "1.0.98"
-srml-balances = { path = "../substrate/srml/balances" }
-srml-system = { path = "../substrate/srml/system" }
-substrate-primitives = { path = "../substrate/core/primitives" }
-substrate-rpc = { path = "../substrate/core/rpc" }
-transaction-pool = { path = "../substrate/core/transaction-pool", package = "substrate-transaction-pool" }
+srml-balances = { git = "https://github.com/paritytech/substrate" }
+substrate-primitives = { git = "https://github.com/paritytech/substrate" }
+substrate-subxt = { path = "../substrate-subxt" }
 url = "1.7"
 
 [dev-dependencies]
-substrate-keyring = { path = "../substrate/core/keyring" }
+substrate-keyring = { git = "https://github.com/paritytech/substrate" }

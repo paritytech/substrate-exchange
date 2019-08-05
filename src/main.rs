@@ -4,16 +4,16 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 
-use balances_shim::rpc;
-use futures::prelude::*;
-use jsonrpc_core::{Error as RpcError, IoHandler, Result as RpcResult};
+use jsonrpc_core::{Error as RpcError, IoHandler};
 use jsonrpc_derive::rpc;
 use jsonrpc_http_server::ServerBuilder;
 use node_runtime::Call;
 use srml_balances::Call as BalancesCall;
 use std::str::FromStr;
 use substrate_primitives::crypto::{Pair, Ss58Codec};
+use substrate_subxt as rpc;
 use url::Url;
+use futures::prelude::*;
 
 /// The private key of an account.
 pub type Key = substrate_primitives::sr25519::Pair;
@@ -52,7 +52,7 @@ impl From<Balance> for u128 {
 }
 
 /// The rpc interface for wallet applications.
-#[rpc]
+#[rpc(server)]
 pub trait Rpc<Balance, Private, Public> {
     /// Query the balance of an account.
     ///
@@ -60,8 +60,8 @@ pub trait Rpc<Balance, Private, Public> {
     /// curl -X POST -H "content-type: application/json" -d
     /// '{"jsonrpc":"2.0","id":0,"method":"account_balance","params":["5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"]}'
     /// http://127.0.0.1:3030
-    #[rpc(name = "account_balance")]
-    fn account_balance(&self, from: Public) -> RpcResult<Balance>;
+    #[rpc(name = "account_balance", returns = "Balance")]
+    fn account_balance(&self, from: Public) -> Box<dyn Future<Item=Balance, Error=RpcError> + Send>;
 
     /// Transfer the given amount of balance from one account to an other.
     ///
@@ -70,12 +70,7 @@ pub trait Rpc<Balance, Private, Public> {
     /// '{"jsonrpc":"2.0","id":0,"method":"transfer_balance","params":["//Alice", "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty", "0xa"]}'
     /// http://127.0.0.1:3030
     #[rpc(name = "transfer_balance", returns = "()")]
-    fn transfer_balance(
-        &self,
-        from: Private,
-        to: Public,
-        amount: Balance,
-    ) -> Box<dyn Future<Item = (), Error = RpcError> + Send>;
+    fn transfer_balance(&self, from: Private, to: Public, amount: Balance) -> Box<dyn Future<Item=(), Error=RpcError> + Send>;
 }
 
 /// The implementation of the Rpc trait.
@@ -84,55 +79,63 @@ pub struct RpcImpl {
 }
 
 impl Rpc<String, String, String> for RpcImpl {
-    fn account_balance(&self, of: String) -> RpcResult<String> {
-        let _public = PubKey::from_string(&of).map_err(|err| {
-            RpcError::invalid_params_with_details(
-                "Expected a ss58 encoded public key.",
-                format!("{:?}", err),
-            )
-        })?;
+    fn account_balance(&self, of: String) -> Box<dyn Future<Item=String, Error=RpcError> + Send> {
+        let _public = match PubKey::from_string(&of) {
+            Ok(public) => public,
+            Err(err) => {
+                return Box::new(futures::future::err(
+                    RpcError::invalid_params_with_details(
+                        "Expected a ss58 encoded public key.",
+                        format!("{:?}", err),
+                    )
+                ))
+            }
+        };
         let balance = Balance(0);
-        Ok(balance.into())
+        Box::new(futures::future::ok(balance.into()))
     }
 
-    fn transfer_balance(
-        &self,
-        from: String,
-        to: String,
-        amount: String,
-    ) -> Box<dyn Future<Item = (), Error = RpcError> + Send> {
+    fn transfer_balance(&self, from: String, to: String, amount: String) -> Box<dyn Future<Item=(), Error=RpcError> + Send> {
         let pair = match Key::from_string(&from, None) {
             Ok(pair) => pair,
             Err(err) => {
-                return Box::new(futures::future::err(RpcError::invalid_params_with_details(
-                    "Expected a suri encoded private key.",
-                    format!("{:?}", err),
-                )))
+                return Box::new(futures::future::err(
+                    RpcError::invalid_params_with_details(
+                        "Expected a suri encoded private key.",
+                        format!("{:?}", err),
+                    )
+                ))
             }
         };
         let public = match PubKey::from_string(&to) {
             Ok(public) => public,
             Err(err) => {
-                return Box::new(futures::future::err(RpcError::invalid_params_with_details(
-                    "Expected a ss58 encoded public key.",
-                    format!("{:?}", err),
-                )))
+                return Box::new(futures::future::err(
+                    RpcError::invalid_params_with_details(
+                        "Expected a ss58 encoded public key.",
+                        format!("{:?}", err),
+                    )
+                ))
             }
         };
         let balance = match Balance::from_str(&amount) {
             Ok(balance) => balance,
             Err(err) => {
-                return Box::new(futures::future::err(RpcError::invalid_params_with_details(
-                    "Expected a hex encoded balance.",
-                    format!("{:?}", err),
-                )))
+                return Box::new(futures::future::err(
+                    RpcError::invalid_params_with_details(
+                        "Expected a hex encoded balance.",
+                        format!("{:?}", err),
+                    )
+                ))
             }
         };
         let call = Call::Balances(BalancesCall::transfer(public.into(), balance.into()));
-        Box::new(rpc::submit(&self.url, pair, call).map(|_| ()).map_err(|e| {
-            log::error!("{:?}", e);
-            RpcError::internal_error()
-        }))
+        Box::new(rpc::submit(&self.url, pair, call)
+            .map(|_| ())
+            .map_err(|e| {
+                log::error!("{:?}", e);
+                RpcError::internal_error()
+            }))
     }
 }
 
