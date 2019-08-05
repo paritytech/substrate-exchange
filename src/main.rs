@@ -4,11 +4,16 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 
+use balances_shim::rpc;
+use futures::prelude::*;
 use jsonrpc_core::{Error as RpcError, IoHandler, Result as RpcResult};
 use jsonrpc_derive::rpc;
 use jsonrpc_http_server::ServerBuilder;
+use node_runtime::Call;
+use srml_balances::Call as BalancesCall;
 use std::str::FromStr;
 use substrate_primitives::crypto::{Pair, Ss58Codec};
+use url::Url;
 
 /// The private key of an account.
 pub type Key = substrate_primitives::sr25519::Pair;
@@ -64,12 +69,19 @@ pub trait Rpc<Balance, Private, Public> {
     /// curl -X POST -H "content-type: application/json" -d
     /// '{"jsonrpc":"2.0","id":0,"method":"transfer_balance","params":["//Alice", "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty", "0xa"]}'
     /// http://127.0.0.1:3030
-    #[rpc(name = "transfer_balance")]
-    fn transfer_balance(&self, from: Private, to: Public, amount: Balance) -> RpcResult<()>;
+    #[rpc(name = "transfer_balance", returns = "()")]
+    fn transfer_balance(
+        &self,
+        from: Private,
+        to: Public,
+        amount: Balance,
+    ) -> Box<dyn Future<Item = (), Error = RpcError> + Send>;
 }
 
 /// The implementation of the Rpc trait.
-pub struct RpcImpl;
+pub struct RpcImpl {
+    url: Url,
+}
 
 impl Rpc<String, String, String> for RpcImpl {
     fn account_balance(&self, of: String) -> RpcResult<String> {
@@ -83,26 +95,44 @@ impl Rpc<String, String, String> for RpcImpl {
         Ok(balance.into())
     }
 
-    fn transfer_balance(&self, from: String, to: String, amount: String) -> RpcResult<()> {
-        let _pair = Key::from_string(&from, None).map_err(|err| {
-            RpcError::invalid_params_with_details(
-                "Expected a suri encoded private key.",
-                format!("{:?}", err),
-            )
-        })?;
-        let _public = PubKey::from_string(&to).map_err(|err| {
-            RpcError::invalid_params_with_details(
-                "Expected a ss58 encoded public key.",
-                format!("{:?}", err),
-            )
-        })?;
-        let _balance = Balance::from_str(&amount).map_err(|err| {
-            RpcError::invalid_params_with_details(
-                "Expected a hex encoded balance.",
-                format!("{:?}", err),
-            )
-        })?;
-        Ok(())
+    fn transfer_balance(
+        &self,
+        from: String,
+        to: String,
+        amount: String,
+    ) -> Box<dyn Future<Item = (), Error = RpcError> + Send> {
+        let pair = match Key::from_string(&from, None) {
+            Ok(pair) => pair,
+            Err(err) => {
+                return Box::new(futures::future::err(RpcError::invalid_params_with_details(
+                    "Expected a suri encoded private key.",
+                    format!("{:?}", err),
+                )))
+            }
+        };
+        let public = match PubKey::from_string(&to) {
+            Ok(public) => public,
+            Err(err) => {
+                return Box::new(futures::future::err(RpcError::invalid_params_with_details(
+                    "Expected a ss58 encoded public key.",
+                    format!("{:?}", err),
+                )))
+            }
+        };
+        let balance = match Balance::from_str(&amount) {
+            Ok(balance) => balance,
+            Err(err) => {
+                return Box::new(futures::future::err(RpcError::invalid_params_with_details(
+                    "Expected a hex encoded balance.",
+                    format!("{:?}", err),
+                )))
+            }
+        };
+        let call = Call::Balances(BalancesCall::transfer(public.into(), balance.into()));
+        Box::new(rpc::submit(&self.url, pair, call).map(|_| ()).map_err(|e| {
+            log::error!("{:?}", e);
+            RpcError::internal_error()
+        }))
     }
 }
 
@@ -110,6 +140,7 @@ impl Rpc<String, String, String> for RpcImpl {
 enum Error {
     Io(std::io::Error),
     AddrParse(std::net::AddrParseError),
+    UrlParse(url::ParseError),
 }
 
 impl From<std::io::Error> for Error {
@@ -124,12 +155,24 @@ impl From<std::net::AddrParseError> for Error {
     }
 }
 
+impl From<url::ParseError> for Error {
+    fn from(error: url::ParseError) -> Self {
+        Error::UrlParse(error)
+    }
+}
+
 fn main() -> Result<(), Error> {
-    let mut io = IoHandler::new();
-    io.extend_with(RpcImpl.to_delegate());
+    env_logger::init();
 
     let addr = "127.0.0.1:3030".parse()?;
-    println!("starting server at {}", addr);
+    log::info!("starting server at {}", addr);
+
+    let url = "ws://127.0.0.1:9944".parse()?;
+    log::info!("connecting to substrate at {}", url);
+
+    let rpc = RpcImpl { url };
+    let mut io = IoHandler::new();
+    io.extend_with(rpc.to_delegate());
 
     let server = ServerBuilder::new(io).start_http(&addr)?;
 
@@ -163,9 +206,8 @@ mod tests {
 
     #[test]
     fn test_transfer_balance() {
-        let result = RpcImpl
-            .transfer_balance(key(Keyring::Alice), pubkey(Keyring::Bob), balance(10))
-            .unwrap();
-        assert_eq!(result, ());
+        let result =
+            RpcImpl.transfer_balance(key(Keyring::Alice), pubkey(Keyring::Bob), balance(10));
+        assert!(result.is_ok());
     }
 }
