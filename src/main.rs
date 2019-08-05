@@ -7,8 +7,9 @@
 use jsonrpc_core::{Error as RpcError, IoHandler};
 use jsonrpc_derive::rpc;
 use jsonrpc_http_server::ServerBuilder;
-use node_runtime::Call;
+use node_runtime::{Call, Runtime};
 use srml_balances::Call as BalancesCall;
+use srml_support::StorageMap;
 use std::str::FromStr;
 use substrate_primitives::crypto::{Pair, Ss58Codec};
 use substrate_subxt as rpc;
@@ -80,7 +81,7 @@ pub struct RpcImpl {
 
 impl Rpc<String, String, String> for RpcImpl {
     fn account_balance(&self, of: String) -> Box<dyn Future<Item=String, Error=RpcError> + Send> {
-        let _public = match PubKey::from_string(&of) {
+        let public = match PubKey::from_string(&of) {
             Ok(public) => public,
             Err(err) => {
                 return Box::new(futures::future::err(
@@ -91,8 +92,13 @@ impl Rpc<String, String, String> for RpcImpl {
                 ))
             }
         };
-        let balance = Balance(0);
-        Box::new(futures::future::ok(balance.into()))
+        let account_balance_key = <srml_balances::FreeBalance<Runtime>>::key_for(&public);
+        Box::new(rpc::fetch::<u128>(&self.url, account_balance_key)
+            .map(|balance| Balance(balance).into())
+            .map_err(|e| {
+                log::error!("{:?}", e);
+                RpcError::internal_error()
+            }))
     }
 
     fn transfer_balance(&self, from: String, to: String, amount: String) -> Box<dyn Future<Item=(), Error=RpcError> + Send> {

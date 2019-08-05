@@ -14,6 +14,7 @@ log = "0.4"
 node-runtime = { git = "https://github.com/paritytech/substrate", features = ["std"] }
 serde = "1.0.98"
 srml-balances = { git = "https://github.com/paritytech/substrate" }
+srml-support = { git = "https://github.com/paritytech/substrate" }
 substrate-primitives = { git = "https://github.com/paritytech/substrate" }
 substrate-subxt = { path = "../substrate-subxt" }
 url = "1.7"
