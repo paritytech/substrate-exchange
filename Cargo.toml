@@ -11,13 +11,16 @@ jsonrpc-core = "12.0.0"
 jsonrpc-derive = "12.0.0"
 jsonrpc-http-server = "12.0.0"
 log = "0.4"
-node-runtime = { git = "https://github.com/paritytech/substrate", features = ["std"] }
+node-runtime = { git = "https://github.com/paritytech/substrate/" }
+parity-codec = { version = "4.1", default-features = false, features = ["derive", "full"] }
 serde = "1.0.98"
-srml-balances = { git = "https://github.com/paritytech/substrate" }
-srml-support = { git = "https://github.com/paritytech/substrate" }
-substrate-primitives = { git = "https://github.com/paritytech/substrate" }
+srml-balances = { git = "https://github.com/paritytech/substrate/" }
+srml-system = { git = "https://github.com/paritytech/substrate/" }
+sr-primitives = { git = "https://github.com/paritytech/substrate/" }
+substrate-primitives = { git = "https://github.com/paritytech/substrate/" }
 substrate-subxt = { path = "../substrate-subxt" }
+tokio = "0.1"
 url = "1.7"
 
 [dev-dependencies]
-substrate-keyring = { git = "https://github.com/paritytech/substrate" }
+substrate-keyring = { git = "https://github.com/paritytech/substrate/" }

@@ -4,144 +4,67 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 
-use jsonrpc_core::{Error as RpcError, IoHandler};
-use jsonrpc_derive::rpc;
+use balances_shim::{Exchange, Rpc, RpcImpl};
+use jsonrpc_core::IoHandler;
 use jsonrpc_http_server::ServerBuilder;
-use node_runtime::{Call, Runtime};
-use srml_balances::Call as BalancesCall;
-use srml_support::StorageMap;
-use std::str::FromStr;
-use substrate_primitives::crypto::{Pair, Ss58Codec};
-use substrate_subxt as rpc;
-use url::Url;
-use futures::prelude::*;
+use sr_primitives::generic::Era;
+use substrate_subxt as subxt;
 
-/// The private key of an account.
-pub type Key = substrate_primitives::sr25519::Pair;
+#[derive(Clone, PartialEq, Eq)]
+struct Runtime;
 
-/// The public key of an account.
-pub type PubKey = substrate_primitives::sr25519::Public;
-
-/// The balance of an account.
-pub struct Balance(pub u128);
-
-impl FromStr for Balance {
-    type Err = std::num::ParseIntError;
-
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let without_prefix = string.trim_start_matches("0x");
-        Ok(Self(u128::from_str_radix(without_prefix, 16)?))
-    }
+impl srml_system::Trait for Runtime {
+    type Origin = <node_runtime::Runtime as srml_system::Trait>::Origin;
+    type Index = <node_runtime::Runtime as srml_system::Trait>::Index;
+    type BlockNumber = <node_runtime::Runtime as srml_system::Trait>::BlockNumber;
+    type Hash = <node_runtime::Runtime as srml_system::Trait>::Hash;
+    type Hashing = <node_runtime::Runtime as srml_system::Trait>::Hashing;
+    type AccountId = <node_runtime::Runtime as srml_system::Trait>::AccountId;
+    type Lookup = <node_runtime::Runtime as srml_system::Trait>::Lookup;
+    type WeightMultiplierUpdate =
+        <node_runtime::Runtime as srml_system::Trait>::WeightMultiplierUpdate;
+    type Header = <node_runtime::Runtime as srml_system::Trait>::Header;
+    type Event = <node_runtime::Runtime as srml_system::Trait>::Event;
+    type BlockHashCount = <node_runtime::Runtime as srml_system::Trait>::BlockHashCount;
+    type MaximumBlockWeight = <node_runtime::Runtime as srml_system::Trait>::MaximumBlockWeight;
+    type MaximumBlockLength = <node_runtime::Runtime as srml_system::Trait>::MaximumBlockLength;
+    type AvailableBlockRatio = <node_runtime::Runtime as srml_system::Trait>::AvailableBlockRatio;
 }
 
-impl From<Balance> for String {
-    fn from(balance: Balance) -> Self {
-        format!("0x{:x}", balance.0)
-    }
+impl srml_balances::Trait for Runtime {
+    type Balance = <node_runtime::Runtime as srml_balances::Trait>::Balance;
+    type OnFreeBalanceZero = ();
+    type OnNewAccount = ();
+    type TransactionPayment = ();
+    type TransferPayment = <node_runtime::Runtime as srml_balances::Trait>::TransferPayment;
+    type DustRemoval = <node_runtime::Runtime as srml_balances::Trait>::DustRemoval;
+    type Event = <node_runtime::Runtime as srml_balances::Trait>::Event;
+    type ExistentialDeposit = <node_runtime::Runtime as srml_balances::Trait>::ExistentialDeposit;
+    type TransferFee = <node_runtime::Runtime as srml_balances::Trait>::TransferFee;
+    type CreationFee = <node_runtime::Runtime as srml_balances::Trait>::CreationFee;
+    type TransactionBaseFee = <node_runtime::Runtime as srml_balances::Trait>::TransactionBaseFee;
+    type TransactionByteFee = <node_runtime::Runtime as srml_balances::Trait>::TransactionByteFee;
+    type WeightToFee = <node_runtime::Runtime as srml_balances::Trait>::WeightToFee;
 }
 
-impl From<u128> for Balance {
-    fn from(balance: u128) -> Self {
-        Balance(balance)
-    }
-}
+impl Exchange for Runtime {
+    type Pair = substrate_primitives::sr25519::Pair;
+    type SignedExtra = (
+        srml_system::CheckGenesis<Self>,
+        srml_system::CheckEra<Self>,
+        srml_system::CheckNonce<Self>,
+        srml_system::CheckWeight<Self>,
+        srml_balances::TakeFees<Self>,
+    );
 
-impl From<Balance> for u128 {
-    fn from(balance: Balance) -> Self {
-        balance.0
-    }
-}
-
-/// The rpc interface for wallet applications.
-#[rpc(server)]
-pub trait Rpc<Balance, Private, Public> {
-    /// Query the balance of an account.
-    ///
-    /// Check alices account balance with curl:
-    /// curl -X POST -H "content-type: application/json" -d
-    /// '{"jsonrpc":"2.0","id":0,"method":"account_balance","params":["5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"]}'
-    /// http://127.0.0.1:3030
-    #[rpc(name = "account_balance", returns = "Balance")]
-    fn account_balance(&self, from: Public) -> Box<dyn Future<Item=Balance, Error=RpcError> + Send>;
-
-    /// Transfer the given amount of balance from one account to an other.
-    ///
-    /// Transfer 10 from alice to bob with curl:
-    /// curl -X POST -H "content-type: application/json" -d
-    /// '{"jsonrpc":"2.0","id":0,"method":"transfer_balance","params":["//Alice", "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty", "0xa"]}'
-    /// http://127.0.0.1:3030
-    #[rpc(name = "transfer_balance", returns = "()")]
-    fn transfer_balance(&self, from: Private, to: Public, amount: Balance) -> Box<dyn Future<Item=(), Error=RpcError> + Send>;
-}
-
-/// The implementation of the Rpc trait.
-pub struct RpcImpl {
-    url: Url,
-}
-
-impl Rpc<String, String, String> for RpcImpl {
-    fn account_balance(&self, of: String) -> Box<dyn Future<Item=String, Error=RpcError> + Send> {
-        let public = match PubKey::from_string(&of) {
-            Ok(public) => public,
-            Err(err) => {
-                return Box::new(futures::future::err(
-                    RpcError::invalid_params_with_details(
-                        "Expected a ss58 encoded public key.",
-                        format!("{:?}", err),
-                    )
-                ))
-            }
-        };
-        let account_balance_key = <srml_balances::FreeBalance<Runtime>>::key_for(&public);
-        Box::new(rpc::fetch::<u128>(&self.url, account_balance_key)
-            .map(|balance| Balance(balance).into())
-            .map_err(|e| {
-                log::error!("{:?}", e);
-                RpcError::internal_error()
-            }))
-    }
-
-    fn transfer_balance(&self, from: String, to: String, amount: String) -> Box<dyn Future<Item=(), Error=RpcError> + Send> {
-        let pair = match Key::from_string(&from, None) {
-            Ok(pair) => pair,
-            Err(err) => {
-                return Box::new(futures::future::err(
-                    RpcError::invalid_params_with_details(
-                        "Expected a suri encoded private key.",
-                        format!("{:?}", err),
-                    )
-                ))
-            }
-        };
-        let public = match PubKey::from_string(&to) {
-            Ok(public) => public,
-            Err(err) => {
-                return Box::new(futures::future::err(
-                    RpcError::invalid_params_with_details(
-                        "Expected a ss58 encoded public key.",
-                        format!("{:?}", err),
-                    )
-                ))
-            }
-        };
-        let balance = match Balance::from_str(&amount) {
-            Ok(balance) => balance,
-            Err(err) => {
-                return Box::new(futures::future::err(
-                    RpcError::invalid_params_with_details(
-                        "Expected a hex encoded balance.",
-                        format!("{:?}", err),
-                    )
-                ))
-            }
-        };
-        let call = Call::Balances(BalancesCall::transfer(public.into(), balance.into()));
-        Box::new(rpc::submit(&self.url, pair, call)
-            .map(|_| ())
-            .map_err(|e| {
-                log::error!("{:?}", e);
-                RpcError::internal_error()
-            }))
+    fn extra(nonce: <Self as srml_system::Trait>::Index) -> Self::SignedExtra {
+        (
+            srml_system::CheckGenesis::<Runtime>::new(),
+            srml_system::CheckEra::<Runtime>::from(Era::Immortal),
+            srml_system::CheckNonce::<Runtime>::from(nonce),
+            srml_system::CheckWeight::<Runtime>::new(),
+            srml_balances::TakeFees::<Runtime>::from(0),
+        )
     }
 }
 
@@ -150,6 +73,7 @@ enum Error {
     Io(std::io::Error),
     AddrParse(std::net::AddrParseError),
     UrlParse(url::ParseError),
+    Subxt(subxt::Error),
 }
 
 impl From<std::io::Error> for Error {
@@ -170,6 +94,20 @@ impl From<url::ParseError> for Error {
     }
 }
 
+impl From<subxt::Error> for Error {
+    fn from(error: subxt::Error) -> Self {
+        Error::Subxt(error)
+    }
+}
+
+/// Check alices account balance with curl:
+/// curl -X POST -H "content-type: application/json" -d
+/// '{"jsonrpc":"2.0","id":0,"method":"account_balance","params":["5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"]}'
+/// http://127.0.0.1:3030
+/// Transfer 10 from alice to bob with curl:
+/// curl -X POST -H "content-type: application/json" -d
+/// '{"jsonrpc":"2.0","id":0,"method":"transfer_balance","params":["//Alice", "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty", "0xa"]}'
+/// http://127.0.0.1:3030
 fn main() -> Result<(), Error> {
     env_logger::init();
 
@@ -179,10 +117,17 @@ fn main() -> Result<(), Error> {
     let url = "ws://127.0.0.1:9944".parse()?;
     log::info!("connecting to substrate at {}", url);
 
-    let rpc = RpcImpl { url };
+    let client = {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(
+            subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new()
+                .set_url(url)
+                .build(),
+        )?
+    };
+    let rpc = RpcImpl(client);
     let mut io = IoHandler::new();
     io.extend_with(rpc.to_delegate());
-
     let server = ServerBuilder::new(io).start_http(&addr)?;
 
     server.wait();
@@ -193,6 +138,7 @@ fn main() -> Result<(), Error> {
 mod tests {
     use super::*;
     use substrate_keyring::sr25519::Keyring;
+    use substrate_primitives::crypto::{Pair, Ss58Codec};
 
     fn key(keyring: Keyring) -> String {
         format!("//{}", <&'static str>::from(keyring))
@@ -203,20 +149,34 @@ mod tests {
     }
 
     fn balance(amount: u128) -> String {
-        Balance(amount).into()
+        amount.to_string()
+    }
+
+    fn rpc() -> RpcImpl<Runtime> {
+        let client = {
+            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(
+                subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new().build(),
+            )
+            .unwrap()
+        };
+        RpcImpl(client)
     }
 
     #[test]
     fn test_account_balance() {
-        let hex = RpcImpl.account_balance(pubkey(Keyring::Alice)).unwrap();
-        let balance = Balance::from_str(&hex).unwrap();
-        assert_eq!(u128::from(balance), 0);
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let _: u128 = rt
+            .block_on(rpc().account_balance(pubkey(Keyring::Alice)))
+            .unwrap()
+            .parse()
+            .unwrap();
     }
 
     #[test]
     fn test_transfer_balance() {
-        let result =
-            RpcImpl.transfer_balance(key(Keyring::Alice), pubkey(Keyring::Bob), balance(10));
-        assert!(result.is_ok());
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(rpc().transfer_balance(key(Keyring::Alice), pubkey(Keyring::Bob), balance(10)))
+            .unwrap();
     }
 }
