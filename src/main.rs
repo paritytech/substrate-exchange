@@ -4,11 +4,11 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 
-use balances_shim::{Exchange, Rpc, RpcImpl};
 use jsonrpc_core::IoHandler;
 use jsonrpc_http_server::ServerBuilder;
 use sr_primitives::generic::Era;
 use substrate_subxt as subxt;
+use substrate_exchange::{Exchange, Rpc, RpcImpl};
 
 #[derive(Clone, PartialEq, Eq)]
 struct Runtime;
