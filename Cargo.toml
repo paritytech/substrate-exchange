@@ -12,7 +12,7 @@ jsonrpc-derive = "12.0.0"
 jsonrpc-http-server = "12.0.0"
 log = "0.4"
 node-runtime = { git = "https://github.com/paritytech/substrate/" }
-parity-codec = { version = "4.1", default-features = false, features = ["derive", "full"] }
+parity-scale-codec = { version = "1.0", default-features = false, features = ["derive", "full"] }
 serde = "1.0.98"
 srml-balances = { git = "https://github.com/paritytech/substrate/" }
 srml-system = { git = "https://github.com/paritytech/substrate/" }

@@ -5,7 +5,7 @@
 use futures::prelude::*;
 use jsonrpc_core::Error;
 use jsonrpc_derive::rpc;
-use parity_codec::Codec;
+use parity_scale_codec::Codec;
 use sr_primitives::traits::{
     SignedExtension,
     StaticLookup,

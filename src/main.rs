@@ -17,6 +17,7 @@ use substrate_subxt as subxt;
 struct Runtime;
 
 impl srml_system::Trait for Runtime {
+    type Call = <node_runtime::Runtime as srml_system::Trait>::Call;
     type Origin = <node_runtime::Runtime as srml_system::Trait>::Origin;
     type Index = <node_runtime::Runtime as srml_system::Trait>::Index;
     type BlockNumber = <node_runtime::Runtime as srml_system::Trait>::BlockNumber;
