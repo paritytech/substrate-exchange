@@ -1,14 +1,17 @@
 //! A shim for the substrate api providing a simplified interface for wallet
 //! applications.
-//!
 #![deny(missing_docs)]
 #![deny(warnings)]
 
 use jsonrpc_core::IoHandler;
 use jsonrpc_http_server::ServerBuilder;
 use sr_primitives::generic::Era;
+use substrate_exchange::{
+    Exchange,
+    Rpc,
+    RpcImpl,
+};
 use substrate_subxt as subxt;
-use substrate_exchange::{Exchange, Rpc, RpcImpl};
 
 #[derive(Clone, PartialEq, Eq)]
 struct Runtime;
@@ -26,9 +29,12 @@ impl srml_system::Trait for Runtime {
     type Header = <node_runtime::Runtime as srml_system::Trait>::Header;
     type Event = <node_runtime::Runtime as srml_system::Trait>::Event;
     type BlockHashCount = <node_runtime::Runtime as srml_system::Trait>::BlockHashCount;
-    type MaximumBlockWeight = <node_runtime::Runtime as srml_system::Trait>::MaximumBlockWeight;
-    type MaximumBlockLength = <node_runtime::Runtime as srml_system::Trait>::MaximumBlockLength;
-    type AvailableBlockRatio = <node_runtime::Runtime as srml_system::Trait>::AvailableBlockRatio;
+    type MaximumBlockWeight =
+        <node_runtime::Runtime as srml_system::Trait>::MaximumBlockWeight;
+    type MaximumBlockLength =
+        <node_runtime::Runtime as srml_system::Trait>::MaximumBlockLength;
+    type AvailableBlockRatio =
+        <node_runtime::Runtime as srml_system::Trait>::AvailableBlockRatio;
 }
 
 impl srml_balances::Trait for Runtime {
@@ -36,14 +42,18 @@ impl srml_balances::Trait for Runtime {
     type OnFreeBalanceZero = ();
     type OnNewAccount = ();
     type TransactionPayment = ();
-    type TransferPayment = <node_runtime::Runtime as srml_balances::Trait>::TransferPayment;
+    type TransferPayment =
+        <node_runtime::Runtime as srml_balances::Trait>::TransferPayment;
     type DustRemoval = <node_runtime::Runtime as srml_balances::Trait>::DustRemoval;
     type Event = <node_runtime::Runtime as srml_balances::Trait>::Event;
-    type ExistentialDeposit = <node_runtime::Runtime as srml_balances::Trait>::ExistentialDeposit;
+    type ExistentialDeposit =
+        <node_runtime::Runtime as srml_balances::Trait>::ExistentialDeposit;
     type TransferFee = <node_runtime::Runtime as srml_balances::Trait>::TransferFee;
     type CreationFee = <node_runtime::Runtime as srml_balances::Trait>::CreationFee;
-    type TransactionBaseFee = <node_runtime::Runtime as srml_balances::Trait>::TransactionBaseFee;
-    type TransactionByteFee = <node_runtime::Runtime as srml_balances::Trait>::TransactionByteFee;
+    type TransactionBaseFee =
+        <node_runtime::Runtime as srml_balances::Trait>::TransactionBaseFee;
+    type TransactionByteFee =
+        <node_runtime::Runtime as srml_balances::Trait>::TransactionByteFee;
     type WeightToFee = <node_runtime::Runtime as srml_balances::Trait>::WeightToFee;
 }
 
@@ -138,7 +148,10 @@ fn main() -> Result<(), Error> {
 mod tests {
     use super::*;
     use substrate_keyring::sr25519::Keyring;
-    use substrate_primitives::crypto::{Pair, Ss58Codec};
+    use substrate_primitives::crypto::{
+        Pair,
+        Ss58Codec,
+    };
 
     fn key(keyring: Keyring) -> String {
         format!("//{}", <&'static str>::from(keyring))
@@ -156,7 +169,9 @@ mod tests {
         let client = {
             let mut rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(
-                subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new().build(),
+                subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new(
+                )
+                .build(),
             )
             .unwrap()
         };
@@ -176,7 +191,11 @@ mod tests {
     #[test]
     fn test_transfer_balance() {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(rpc().transfer_balance(key(Keyring::Alice), pubkey(Keyring::Bob), balance(10)))
-            .unwrap();
+        rt.block_on(rpc().transfer_balance(
+            key(Keyring::Alice),
+            pubkey(Keyring::Bob),
+            balance(10),
+        ))
+        .unwrap();
     }
 }

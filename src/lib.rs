@@ -1,5 +1,4 @@
 //! A shim for the substrate api providing a simplified interface for exchanges.
-//!
 #![deny(missing_docs)]
 #![deny(warnings)]
 
@@ -7,9 +6,15 @@ use futures::prelude::*;
 use jsonrpc_core::Error;
 use jsonrpc_derive::rpc;
 use parity_codec::Codec;
-use sr_primitives::traits::{SignedExtension, StaticLookup};
+use sr_primitives::traits::{
+    SignedExtension,
+    StaticLookup,
+};
 use srml_balances::Call as BalancesCall;
-use substrate_primitives::crypto::{Pair, Ss58Codec};
+use substrate_primitives::crypto::{
+    Pair,
+    Ss58Codec,
+};
 use substrate_subxt as subxt;
 
 /// Trait defining all chain specific data.
@@ -28,8 +33,10 @@ pub trait Exchange: srml_system::Trait + srml_balances::Trait {
 pub trait Rpc<T: Exchange> {
     /// Query the balance of an account.
     #[rpc(name = "account_balance", returns = "String")]
-    fn account_balance(&self, from: String)
-        -> Box<dyn Future<Item = String, Error = Error> + Send>;
+    fn account_balance(
+        &self,
+        from: String,
+    ) -> Box<dyn Future<Item = String, Error = Error> + Send>;
 
     /// Transfer the given amount of balance from one account to an other.
     #[rpc(name = "transfer_balance", returns = "()")]
@@ -46,14 +53,18 @@ pub struct RpcImpl<T: Exchange>(pub subxt::Client<T, T::SignedExtra>);
 
 impl<T: Exchange> Rpc<T> for RpcImpl<T>
 where
-    <T::Pair as Pair>::Public: Ss58Codec
-        + Into<<T as srml_system::Trait>::AccountId>
-        + Into<<<T as srml_system::Trait>::Lookup as StaticLookup>::Source>,
+    <T::Pair as Pair>::Public:
+        Ss58Codec
+            + Into<<T as srml_system::Trait>::AccountId>
+            + Into<<<T as srml_system::Trait>::Lookup as StaticLookup>::Source>,
     <T::Pair as Pair>::Signature: Codec,
     <T as srml_balances::Trait>::Balance: std::fmt::Display + std::str::FromStr,
     <<T as srml_balances::Trait>::Balance as std::str::FromStr>::Err: std::fmt::Debug,
 {
-    fn account_balance(&self, of: String) -> Box<dyn Future<Item = String, Error = Error> + Send> {
+    fn account_balance(
+        &self,
+        of: String,
+    ) -> Box<dyn Future<Item = String, Error = Error> + Send> {
         let public = match <T::Pair as Pair>::Public::from_string(&of) {
             Ok(public) => public,
             Err(err) => {
@@ -76,7 +87,9 @@ where
             .key(&account);
         Box::new(
             self.0
-                .fetch_or_default::<<T as srml_balances::Trait>::Balance>(account_balance_key)
+                .fetch_or_default::<<T as srml_balances::Trait>::Balance>(
+                    account_balance_key,
+                )
                 .map(|balance| format!("{}", balance))
                 .map_err(|e| {
                     log::error!("{:?}", e);
