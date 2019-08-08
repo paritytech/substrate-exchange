@@ -18,7 +18,7 @@ srml-balances = { git = "https://github.com/paritytech/substrate/" }
 srml-system = { git = "https://github.com/paritytech/substrate/" }
 sr-primitives = { git = "https://github.com/paritytech/substrate/" }
 substrate-primitives = { git = "https://github.com/paritytech/substrate/" }
-substrate-subxt = { path = "../substrate-subxt" }
+substrate-subxt = { git = "https://github.com/paritytech/substrate-subxt/" }
 tokio = "0.1"
 url = "1.7"
 
