@@ -166,37 +166,36 @@ mod tests {
         amount.to_string()
     }
 
-    fn rpc() -> RpcImpl<Runtime> {
-        let client = {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+    fn rpc(rt: &mut tokio::runtime::Runtime) -> RpcImpl<Runtime> {
+        RpcImpl(
             rt.block_on(
                 subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new(
                 )
                 .build(),
             )
-            .unwrap()
-        };
-        RpcImpl(client)
+            .unwrap(),
+        )
     }
 
     #[test]
     fn test_account_balance() {
+        env_logger::try_init().ok();
         let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let _: u128 = rt
-            .block_on(rpc().account_balance(pubkey(Keyring::Alice)))
-            .unwrap()
-            .parse()
-            .unwrap();
+        let client = rpc(&mut rt);
+        let pubkey = pubkey(Keyring::Alice);
+        let balance = client.account_balance(pubkey);
+        let result = rt.block_on(balance).unwrap();
+        let _: u128 = result.parse().unwrap();
     }
 
     #[test]
     fn test_transfer_balance() {
+        env_logger::try_init().ok();
         let mut rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(rpc().transfer_balance(
-            key(Keyring::Alice),
-            pubkey(Keyring::Bob),
-            balance(10),
-        ))
-        .unwrap();
+        let client = rpc(&mut rt);
+        let (key, pubkey, balance) =
+            (key(Keyring::Alice), pubkey(Keyring::Bob), balance(10_000));
+        let transfer = client.transfer_balance(key, pubkey, balance);
+        rt.block_on(transfer).unwrap();
     }
 }

@@ -10,7 +10,7 @@ use sr_primitives::traits::{
     SignedExtension,
     StaticLookup,
 };
-use srml_balances::Call as BalancesCall;
+use srml_balances::Call;
 use substrate_primitives::crypto::{
     Pair,
     Ss58Codec,
@@ -79,11 +79,11 @@ where
             .0
             .metadata()
             .module("Balances")
-            .unwrap()
+            .expect("runtime has srml_balances module")
             .storage("FreeBalance")
-            .unwrap()
+            .expect("srml_balances has a free balance")
             .map()
-            .unwrap()
+            .expect("free balance is a map")
             .key(&account);
         Box::new(
             self.0
@@ -134,10 +134,18 @@ where
         };
         let xt = self.0.xt(pair, T::extra);
 
-        let transfer = BalancesCall::transfer::<T>(public.into(), balance.into());
-        let call = self.0.metadata().module("Balances").unwrap().call(transfer);
+        let transfer = Call::transfer::<T>(public.into(), balance.into());
+        let call = self
+            .0
+            .metadata()
+            .module("Balances")
+            .expect("runtime has srml_balances module")
+            .call(transfer);
 
-        Box::new(xt.and_then(|xt| xt.submit(call)).map(|_| ()).map_err(|e| {
+        Box::new(
+            xt.and_then(|xt| xt.submit(call))
+            .map(|hash| log::info!("{:?}", hash))
+            .map_err(|e| {
             log::error!("{:?}", e);
             Error::internal_error()
         }))
