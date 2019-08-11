@@ -11,72 +11,52 @@ use substrate_exchange::{
     Rpc,
     RpcImpl,
 };
-use substrate_subxt as subxt;
+use substrate_subxt::{
+    ClientBuilder,
+    Error as SubError,
+    srml::{
+        balances::Balances,
+        system::System,
+    },
+};
 
-#[derive(Clone, PartialEq, Eq)]
 struct Runtime;
 
-impl srml_system::Trait for Runtime {
-    type Call = <node_runtime::Runtime as srml_system::Trait>::Call;
-    type Origin = <node_runtime::Runtime as srml_system::Trait>::Origin;
+impl System for Runtime {
     type Index = <node_runtime::Runtime as srml_system::Trait>::Index;
     type BlockNumber = <node_runtime::Runtime as srml_system::Trait>::BlockNumber;
     type Hash = <node_runtime::Runtime as srml_system::Trait>::Hash;
     type Hashing = <node_runtime::Runtime as srml_system::Trait>::Hashing;
     type AccountId = <node_runtime::Runtime as srml_system::Trait>::AccountId;
     type Lookup = <node_runtime::Runtime as srml_system::Trait>::Lookup;
-    type WeightMultiplierUpdate =
-        <node_runtime::Runtime as srml_system::Trait>::WeightMultiplierUpdate;
     type Header = <node_runtime::Runtime as srml_system::Trait>::Header;
     type Event = <node_runtime::Runtime as srml_system::Trait>::Event;
-    type BlockHashCount = <node_runtime::Runtime as srml_system::Trait>::BlockHashCount;
-    type MaximumBlockWeight =
-        <node_runtime::Runtime as srml_system::Trait>::MaximumBlockWeight;
-    type MaximumBlockLength =
-        <node_runtime::Runtime as srml_system::Trait>::MaximumBlockLength;
-    type AvailableBlockRatio =
-        <node_runtime::Runtime as srml_system::Trait>::AvailableBlockRatio;
+
+    type SignedExtra = (
+        srml_system::CheckGenesis<node_runtime::Runtime>,
+        srml_system::CheckEra<node_runtime::Runtime>,
+        srml_system::CheckNonce<node_runtime::Runtime>,
+        srml_system::CheckWeight<node_runtime::Runtime>,
+        srml_balances::TakeFees<node_runtime::Runtime>,
+    );
+
+    fn extra(nonce: <Self as System>::Index) -> Self::SignedExtra {
+        (
+            srml_system::CheckGenesis::new(),
+            srml_system::CheckEra::from(Era::Immortal),
+            srml_system::CheckNonce::from(nonce),
+            srml_system::CheckWeight::new(),
+            srml_balances::TakeFees::from(0),
+        )
+    }
 }
 
-impl srml_balances::Trait for Runtime {
+impl Balances for Runtime {
     type Balance = <node_runtime::Runtime as srml_balances::Trait>::Balance;
-    type OnFreeBalanceZero = ();
-    type OnNewAccount = ();
-    type TransactionPayment = ();
-    type TransferPayment =
-        <node_runtime::Runtime as srml_balances::Trait>::TransferPayment;
-    type DustRemoval = <node_runtime::Runtime as srml_balances::Trait>::DustRemoval;
-    type Event = <node_runtime::Runtime as srml_balances::Trait>::Event;
-    type ExistentialDeposit =
-        <node_runtime::Runtime as srml_balances::Trait>::ExistentialDeposit;
-    type TransferFee = <node_runtime::Runtime as srml_balances::Trait>::TransferFee;
-    type CreationFee = <node_runtime::Runtime as srml_balances::Trait>::CreationFee;
-    type TransactionBaseFee =
-        <node_runtime::Runtime as srml_balances::Trait>::TransactionBaseFee;
-    type TransactionByteFee =
-        <node_runtime::Runtime as srml_balances::Trait>::TransactionByteFee;
-    type WeightToFee = <node_runtime::Runtime as srml_balances::Trait>::WeightToFee;
 }
 
 impl Exchange for Runtime {
     type Pair = substrate_primitives::sr25519::Pair;
-    type SignedExtra = (
-        srml_system::CheckGenesis<Self>,
-        srml_system::CheckEra<Self>,
-        srml_system::CheckNonce<Self>,
-        srml_system::CheckWeight<Self>,
-        srml_balances::TakeFees<Self>,
-    );
-
-    fn extra(nonce: <Self as srml_system::Trait>::Index) -> Self::SignedExtra {
-        (
-            srml_system::CheckGenesis::<Runtime>::new(),
-            srml_system::CheckEra::<Runtime>::from(Era::Immortal),
-            srml_system::CheckNonce::<Runtime>::from(nonce),
-            srml_system::CheckWeight::<Runtime>::new(),
-            srml_balances::TakeFees::<Runtime>::from(0),
-        )
-    }
 }
 
 #[derive(Debug)]
@@ -84,7 +64,7 @@ enum Error {
     Io(std::io::Error),
     AddrParse(std::net::AddrParseError),
     UrlParse(url::ParseError),
-    Subxt(subxt::Error),
+    Subxt(SubError),
 }
 
 impl From<std::io::Error> for Error {
@@ -105,8 +85,8 @@ impl From<url::ParseError> for Error {
     }
 }
 
-impl From<subxt::Error> for Error {
-    fn from(error: subxt::Error) -> Self {
+impl From<SubError> for Error {
+    fn from(error: SubError) -> Self {
         Error::Subxt(error)
     }
 }
@@ -129,14 +109,13 @@ fn main() -> Result<(), Error> {
     log::info!("connecting to substrate at {}", url);
 
     let client = {
+        let client = ClientBuilder::<Runtime>::new()
+            .set_url(url)
+            .build();
         let mut rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(
-            subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new()
-                .set_url(url)
-                .build(),
-        )?
+        rt.block_on(client)?
     };
-    let rpc = RpcImpl(client);
+    let rpc = RpcImpl::new(client);
     let mut io = IoHandler::new();
     io.extend_with(rpc.to_delegate());
     let server = ServerBuilder::new(io).start_http(&addr)?;
@@ -166,36 +145,62 @@ mod tests {
         amount.to_string()
     }
 
-    fn rpc(rt: &mut tokio::runtime::Runtime) -> RpcImpl<Runtime> {
-        RpcImpl(
-            rt.block_on(
-                subxt::ClientBuilder::<Runtime, <Runtime as Exchange>::SignedExtra>::new(
-                )
-                .build(),
-            )
-            .unwrap(),
-        )
+    fn account_balance(
+        rt: &mut tokio::runtime::Runtime,
+        rpc: &RpcImpl<Runtime>,
+        of: Keyring,
+    ) -> u128 {
+        let balance = rpc.account_balance(pubkey(of));
+        let result = rt.block_on(balance).unwrap();
+        result.parse().unwrap()
+    }
+
+    fn transfer_balance(
+        rt: &mut tokio::runtime::Runtime,
+        rpc: &RpcImpl<Runtime>,
+        from: Keyring,
+        to: Keyring,
+        amount: u128,
+    ) {
+        let transfer = rpc.transfer_balance(key(from), pubkey(to), balance(amount));
+        rt.block_on(transfer).unwrap();
+    }
+
+    fn test_setup() -> (tokio::runtime::Runtime, RpcImpl<Runtime>) {
+        env_logger::try_init().ok();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let client = ClientBuilder::<Runtime>::new().build();
+        let client = rt.block_on(client).unwrap();
+        let rpc = RpcImpl::new(client);
+        (rt, rpc)
     }
 
     #[test]
     fn test_account_balance() {
-        env_logger::try_init().ok();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let client = rpc(&mut rt);
-        let pubkey = pubkey(Keyring::Alice);
-        let balance = client.account_balance(pubkey);
-        let result = rt.block_on(balance).unwrap();
-        let _: u128 = result.parse().unwrap();
+        let (mut rt, rpc) = test_setup();
+        account_balance(&mut rt, &rpc, Keyring::Alice);
     }
 
     #[test]
     fn test_transfer_balance() {
-        env_logger::try_init().ok();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let client = rpc(&mut rt);
-        let (key, pubkey, balance) =
-            (key(Keyring::Alice), pubkey(Keyring::Bob), balance(10_000));
-        let transfer = client.transfer_balance(key, pubkey, balance);
-        rt.block_on(transfer).unwrap();
+        let (mut rt, rpc) = test_setup();
+        transfer_balance(&mut rt, &rpc, Keyring::Alice, Keyring::Bob, 10_000);
+    }
+
+    #[test]
+    //#[ignore] // need to wait for transaction to go through
+    fn test_all() {
+        let (mut rt, rpc) = test_setup();
+        let from = Keyring::Alice;
+        let to = Keyring::Bob;
+        let amount = 10_000;
+
+        let balance_from = account_balance(&mut rt, &rpc, from);
+        let balance_to = account_balance(&mut rt, &rpc, to);
+        transfer_balance(&mut rt, &rpc, from, to, amount);
+        let balance_from2 = account_balance(&mut rt, &rpc, from);
+        let balance_to2 = account_balance(&mut rt, &rpc, to);
+        assert_eq!(balance_from, balance_from2 + amount);
+        assert_eq!(balance_to + amount, balance_to2);
     }
 }

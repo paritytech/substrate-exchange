@@ -2,30 +2,52 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 
-use futures::prelude::*;
-use jsonrpc_core::Error;
+use futures::future::{self, Future};
+use jsonrpc_core::Error as RpcError;
 use jsonrpc_derive::rpc;
 use parity_scale_codec::Codec;
-use sr_primitives::traits::{
-    SignedExtension,
-    StaticLookup,
+use sr_primitives::traits::StaticLookup;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
 };
-use srml_balances::Call;
 use substrate_primitives::crypto::{
     Pair,
     Ss58Codec,
 };
-use substrate_subxt as subxt;
+use substrate_subxt::{
+    Client,
+    srml::{
+        balances::{Balances, BalancesCalls, BalancesStore},
+        system::System,
+    }
+};
 
 /// Trait defining all chain specific data.
-pub trait Exchange: srml_system::Trait + srml_balances::Trait {
+pub trait Exchange: System + Balances + 'static {
     /// Pair to use for signing.
     type Pair: Pair;
-    /// Signed extra to include in transactions.
-    type SignedExtra: SignedExtension;
+}
 
-    /// Constructs signed extra.
-    fn extra(nonce: <Self as srml_system::Trait>::Index) -> Self::SignedExtra;
+/// Error enum
+pub enum Error {
+    /// Invalid SURI.
+    InvalidSURI,
+    /// Invalid SS58.
+    InvalidSS58,
+    /// Invalid balance.
+    InvalidBalance,
+}
+
+impl From<Error> for RpcError {
+    fn from(err: Error) -> Self {
+        let msg = match err {
+            Error::InvalidSURI => "Expected a suri encoded private key.",
+            Error::InvalidSS58 => "Expected a ss58 encoded public key.",
+            Error::InvalidBalance => "Expected a numeric string.",
+        };
+        RpcError::invalid_params(msg)
+    }
 }
 
 /// The rpc interface for wallet applications.
@@ -36,7 +58,7 @@ pub trait Rpc<T: Exchange> {
     fn account_balance(
         &self,
         from: String,
-    ) -> Box<dyn Future<Item = String, Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = String, Error = RpcError> + Send>;
 
     /// Transfer the given amount of balance from one account to an other.
     #[rpc(name = "transfer_balance", returns = "()")]
@@ -45,57 +67,58 @@ pub trait Rpc<T: Exchange> {
         from: String,
         to: String,
         amount: String,
-    ) -> Box<dyn Future<Item = (), Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = (), Error = RpcError> + Send>;
 }
 
 /// The implementation of the Rpc trait.
-pub struct RpcImpl<T: Exchange>(pub subxt::Client<T, T::SignedExtra>);
+pub struct RpcImpl<T: Exchange> {
+    client: Client<T>,
+    nonces: Arc<Mutex<HashMap<T::AccountId, T::Index>>>,
+}
+
+impl<T: Exchange> RpcImpl<T>
+where
+    <T as System>::AccountId: std::hash::Hash,
+{
+    /// Creates a new `RpcImpl`.
+    pub fn new(client: Client<T>) -> Self {
+        Self { client, nonces: Default::default() }
+    }
+}
+
 
 impl<T: Exchange> Rpc<T> for RpcImpl<T>
 where
+    <T as System>::AccountId: std::hash::Hash,
     <T::Pair as Pair>::Public:
         Ss58Codec
-            + Into<<T as srml_system::Trait>::AccountId>
-            + Into<<<T as srml_system::Trait>::Lookup as StaticLookup>::Source>,
+            + Into<<T as System>::AccountId>
+            + Into<<<T as System>::Lookup as StaticLookup>::Source>,
     <T::Pair as Pair>::Signature: Codec,
-    <T as srml_balances::Trait>::Balance: std::fmt::Display + std::str::FromStr,
-    <<T as srml_balances::Trait>::Balance as std::str::FromStr>::Err: std::fmt::Debug,
+    <T as Balances>::Balance: std::fmt::Display + std::str::FromStr,
+    <<T as Balances>::Balance as std::str::FromStr>::Err: std::fmt::Debug,
 {
     fn account_balance(
         &self,
         of: String,
-    ) -> Box<dyn Future<Item = String, Error = Error> + Send> {
-        let public = match <T::Pair as Pair>::Public::from_string(&of) {
-            Ok(public) => public,
-            Err(err) => {
-                return Box::new(futures::future::err(Error::invalid_params_with_details(
-                    "Expected a ss58 encoded public key.",
-                    format!("{:?}", err),
-                )))
-            }
+    ) -> Box<dyn Future<Item = String, Error = RpcError> + Send> {
+        let params = || {
+            let public = <T::Pair as Pair>::Public::from_string(&of)
+              .map_err(|_| Error::InvalidSS58)?;
+            let result: Result<_, Error> = Ok(public);
+            result
         };
-        let account: <T as srml_system::Trait>::AccountId = public.into();
-        let account_balance_key = self
-            .0
-            .metadata()
-            .module("Balances")
-            .expect("runtime has srml_balances module")
-            .storage("FreeBalance")
-            .expect("srml_balances has a free balance")
-            .map()
-            .expect("free balance is a map")
-            .key(&account);
-        Box::new(
-            self.0
-                .fetch_or_default::<<T as srml_balances::Trait>::Balance>(
-                    account_balance_key,
-                )
-                .map(|balance| format!("{}", balance))
-                .map_err(|e| {
-                    log::error!("{:?}", e);
-                    Error::internal_error()
-                }),
-        )
+        let public = match params() {
+            Ok(params) => params,
+            Err(err) => return Box::new(future::err(err.into())),
+        };
+        let free_balance = self.client.free_balance(public.into())
+            .map(|balance| format!("{}", balance))
+            .map_err(|e| {
+                log::error!("{:?}", e);
+                RpcError::internal_error()
+            });
+        Box::new(free_balance)
     }
 
     fn transfer_balance(
@@ -103,51 +126,34 @@ where
         from: String,
         to: String,
         amount: String,
-    ) -> Box<dyn Future<Item = (), Error = Error> + Send> {
-        let pair = match T::Pair::from_string(&from, None) {
-            Ok(pair) => pair,
-            Err(err) => {
-                return Box::new(futures::future::err(Error::invalid_params_with_details(
-                    "Expected a suri encoded private key.",
-                    format!("{:?}", err),
-                )))
-            }
+    ) -> Box<dyn Future<Item = (), Error = RpcError> + Send> {
+        let params = || {
+            let pair = T::Pair::from_string(&from, None)
+              .map_err(|_| Error::InvalidSURI)?;
+            let public = <T::Pair as Pair>::Public::from_string(&to)
+            .map_err(|_| Error::InvalidSS58)?;
+            let balance = amount.parse().map_err(|_| Error::InvalidBalance)?;
+            let result: Result<_, Error> = Ok((pair, public, balance));
+            result
         };
-        let public = match <T::Pair as Pair>::Public::from_string(&to) {
-            Ok(public) => public,
-            Err(err) => {
-                return Box::new(futures::future::err(Error::invalid_params_with_details(
-                    "Expected a ss58 encoded public key.",
-                    format!("{:?}", err),
-                )))
-            }
+        let (pair, public, balance) = match params() {
+            Ok(params) => params,
+            Err(err) => return Box::new(future::err(err.into())),
         };
-        let balance: Result<<T as srml_balances::Trait>::Balance, _> = amount.parse();
-        let balance = match balance {
-            Ok(balance) => balance,
-            Err(err) => {
-                return Box::new(futures::future::err(Error::invalid_params_with_details(
-                    "Expected a hex encoded balance.",
-                    format!("{:?}", err),
-                )))
-            }
-        };
-        let xt = self.0.xt(pair, T::extra);
-
-        let transfer = Call::transfer::<T>(public.into(), balance.into());
-        let call = self
-            .0
-            .metadata()
-            .module("Balances")
-            .expect("runtime has srml_balances module")
-            .call(transfer);
-
-        Box::new(
-            xt.and_then(|xt| xt.submit(call))
+        let nonce = self.nonces.lock().unwrap().get(&pair.public().into()).cloned();
+        let nonces = self.nonces.clone();
+        let transfer = self.client.xt(pair.clone(), nonce)
+            .and_then(move |mut xt| {
+                let fut = xt.transfer(public.into(), balance);
+                nonces.lock().unwrap()
+                    .insert(pair.public().into(), xt.nonce());
+                fut
+            })
             .map(|hash| log::info!("{:?}", hash))
             .map_err(|e| {
-            log::error!("{:?}", e);
-            Error::internal_error()
-        }))
+                log::error!("{:?}", e);
+                RpcError::internal_error()
+            });
+        Box::new(transfer)
     }
 }
