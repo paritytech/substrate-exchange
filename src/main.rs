@@ -14,45 +14,43 @@ use substrate_exchange::{
 use substrate_subxt::{
     ClientBuilder,
     Error as SubError,
-    srml::{
-        balances::Balances,
-        system::System,
-    },
+    balances::Balances,
+    system::System,
 };
 
 struct Runtime;
 
 impl System for Runtime {
-    type Index = <node_runtime::Runtime as srml_system::Trait>::Index;
-    type BlockNumber = <node_runtime::Runtime as srml_system::Trait>::BlockNumber;
-    type Hash = <node_runtime::Runtime as srml_system::Trait>::Hash;
-    type Hashing = <node_runtime::Runtime as srml_system::Trait>::Hashing;
-    type AccountId = <node_runtime::Runtime as srml_system::Trait>::AccountId;
-    type Lookup = <node_runtime::Runtime as srml_system::Trait>::Lookup;
-    type Header = <node_runtime::Runtime as srml_system::Trait>::Header;
-    type Event = <node_runtime::Runtime as srml_system::Trait>::Event;
+    type Index = <node_runtime::Runtime as frame_system::Trait>::Index;
+    type BlockNumber = <node_runtime::Runtime as frame_system::Trait>::BlockNumber;
+    type Hash = <node_runtime::Runtime as frame_system::Trait>::Hash;
+    type Hashing = <node_runtime::Runtime as frame_system::Trait>::Hashing;
+    type AccountId = <node_runtime::Runtime as frame_system::Trait>::AccountId;
+    type Lookup = <node_runtime::Runtime as frame_system::Trait>::Lookup;
+    type Header = <node_runtime::Runtime as frame_system::Trait>::Header;
+    type Event = <node_runtime::Runtime as frame_system::Trait>::Event;
 
     type SignedExtra = (
-        srml_system::CheckGenesis<node_runtime::Runtime>,
-        srml_system::CheckEra<node_runtime::Runtime>,
-        srml_system::CheckNonce<node_runtime::Runtime>,
-        srml_system::CheckWeight<node_runtime::Runtime>,
-        srml_balances::TakeFees<node_runtime::Runtime>,
+        frame_system::CheckGenesis<node_runtime::Runtime>,
+        frame_system::CheckEra<node_runtime::Runtime>,
+        frame_system::CheckNonce<node_runtime::Runtime>,
+        frame_system::CheckWeight<node_runtime::Runtime>,
+        pallet_balances::TakeFees<node_runtime::Runtime>,
     );
 
     fn extra(nonce: <Self as System>::Index) -> Self::SignedExtra {
         (
-            srml_system::CheckGenesis::new(),
-            srml_system::CheckEra::from(Era::Immortal),
-            srml_system::CheckNonce::from(nonce),
-            srml_system::CheckWeight::new(),
-            srml_balances::TakeFees::from(0),
+            frame_system::CheckGenesis::new(),
+            frame_system::CheckEra::from(Era::Immortal),
+            frame_system::CheckNonce::from(nonce),
+            frame_system::CheckWeight::new(),
+            pallet_balances::TakeFees::from(0),
         )
     }
 }
 
 impl Balances for Runtime {
-    type Balance = <node_runtime::Runtime as srml_balances::Trait>::Balance;
+    type Balance = <node_runtime::Runtime as pallet_balances::Trait>::Balance;
 }
 
 impl Exchange for Runtime {
