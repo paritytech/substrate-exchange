@@ -17,10 +17,8 @@ use substrate_primitives::crypto::{
 };
 use substrate_subxt::{
     Client,
-    srml::{
-        balances::{Balances, BalancesCalls, BalancesStore},
-        system::System,
-    }
+    balances::{Balances, BalancesCalls, BalancesStore},
+    system::System,
 };
 
 /// Trait defining all chain specific data.

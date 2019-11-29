@@ -14,8 +14,8 @@ log = "0.4"
 node-runtime = { git = "https://github.com/paritytech/substrate/" }
 parity-scale-codec = { version = "1.0", default-features = false, features = ["derive", "full"] }
 serde = "1.0.98"
-srml-balances = { git = "https://github.com/paritytech/substrate/" }
-srml-system = { git = "https://github.com/paritytech/substrate/" }
+pallet-balances = { git = "https://github.com/paritytech/substrate/" }
+frame-system = { git = "https://github.com/paritytech/substrate/" }
 sr-primitives = { git = "https://github.com/paritytech/substrate/" }
 substrate-primitives = { git = "https://github.com/paritytech/substrate/" }
 substrate-subxt = { git = "https://github.com/paritytech/substrate-subxt/" }
